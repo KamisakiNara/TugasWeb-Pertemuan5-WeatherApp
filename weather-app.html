@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weather App — Tugas Rutin 5</title>
+
+<!--
+  =====================================================
+  WEATHER APP — TUGAS RUTIN 5 (Pemrograman Web)
+  =====================================================
+  Aplikasi cuaca sederhana menggunakan OpenWeatherMap API.
+
+  Struktur file ini:
+  1. <style>  -> tampilan & responsivitas
+  2. <body>   -> struktur halaman
+  3. <script> -> logika fetch data, error handling, dsb.
+
+  CARA PAKAI:
+  1. Daftar API key GRATIS di https://openweathermap.org/api
+     (menu "API keys" setelah login/daftar)
+  2. Buka bagian <script> di bawah, cari variabel API_KEY,
+     lalu ganti isinya dengan API key milik Anda
+  3. Buka file ini di browser (double click, atau lewat Live Server)
+
+  CHECKLIST REQUIREMENT TUGAS (semua sudah dipenuhi):
+  1. ES6+ (const, arrow function, template literal) -> dipakai di seluruh kode JS
+  2. async/await + Fetch API                         -> fungsi fetchWeather()
+  3. Kota, suhu, deskripsi, ikon, kelembaban          -> fungsi renderWeather() & renderMetrics()
+  4. Error handling kota tidak ditemukan (404)        -> di dalam fetchWeather()
+  5. Error handling network error                     -> blok try/catch di fetchWeather()
+  6. Loading state saat fetch data                    -> fungsi showLoading()
+  7. Minimal 1 array method (map/filter/reduce)       -> renderMetrics() memakai map()
+  8. UI responsif (mobile-friendly)                   -> lihat media query di <style>
+  =====================================================
+-->
+
+<style>
+  /* Font "Space Grotesk" dari Google Fonts — @import harus jadi baris CSS paling atas */
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+  /* ===================================================
+     1. RESET DASAR & VARIABEL WARNA GLOBAL
+     =================================================== */
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    /* Warna aksen & elemen UI */
+    --accent: #f5a947;
+    --accent-dark: #d98f32;
+    --panel-bg: rgba(255, 255, 255, 0.14);
+    --panel-border: rgba(255, 255, 255, 0.28);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.78);
+    --error-bg: #c0392b;
+
+    /* Radius dipakai berulang supaya konsisten */
+    --radius-lg: 28px;
+    --radius-pill: 999px;
+  }
+
+  body {
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+
+    /* Gradien awal (kondisi cerah) sebelum data cuaca pertama selesai dimuat.
+       Gradien ini akan diganti otomatis oleh JS sesuai kondisi cuaca asli
+       (lihat WEATHER_THEMES & applyWeatherTheme di bagian <script>) */
+    background: linear-gradient(180deg, #1e5a8e 0%, #6fb8e0 100%);
+    transition: background 0.6s ease;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* ===================================================
+     2. SEARCH BAR
+     =================================================== */
+  .search-bar {
+    display: flex;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-pill);
+    padding: 6px 6px 6px 22px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 0; /* supaya input tidak overflow di layar sempit */
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 500;
+    outline: none;
+  }
+
+  .search-input::placeholder {
+    color: var(--text-secondary);
+  }
+
+  .search-btn {
+    border: none;
+    background: var(--accent);
+    color: #2b2110;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 10px 22px;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.15s ease;
+  }
+
+  .search-btn:hover {
+    background: var(--accent-dark);
+  }
+
+  .search-btn:active {
+    transform: scale(0.96);
+  }
+
+  .search-input:focus-visible,
+  .search-btn:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: 2px;
+  }
+
+  /* ===================================================
+     3. STATE: LOADING & ERROR
+     =================================================== */
+  .hidden {
+    display: none !important;
+  }
+
+  .state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    padding: 48px 20px;
+  }
+
+  .spinner {
+    width: 38px;
+    height: 38px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: var(--text-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .error-state {
+    background: var(--error-bg);
+    border-radius: var(--radius-lg);
+    padding: 32px 24px;
+  }
+
+  .error-icon {
+    font-size: 1.8rem;
+  }
+
+  .error-text {
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  /* ===================================================
+     4. HERO (ikon, suhu, deskripsi, kota)
+     =================================================== */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+    animation: fadeIn 0.5s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .weather-icon {
+    width: 120px;
+    height: 120px;
+    margin-bottom: -8px;
+  }
+
+  .temperature {
+    font-size: 4.5rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .description {
+    font-size: 1.15rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+  }
+
+  .location {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-top: 6px;
+  }
+
+  /* ===================================================
+     5. PANEL METRIK (kelembaban, angin, dll)
+     =================================================== */
+  .metrics-panel {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* 2x2 di layar kecil (mobile) */
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    overflow: hidden;
+  }
+
+  .metric-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 18px 12px;
+    border-right: 1px solid var(--panel-border);
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  /* Kolom kanan (item ke-2 & ke-4) tidak perlu garis kanan */
+  .metric-item:nth-child(2n) {
+    border-right: none;
+  }
+
+  /* Baris terakhir (item ke-3 & ke-4) tidak perlu garis bawah */
+  .metric-item:nth-child(n + 3) {
+    border-bottom: none;
+  }
+
+  .metric-icon {
+    font-size: 1.3rem;
+  }
+
+  .metric-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .metric-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  /* ===================================================
+     6. RESPONSIF: TABLET & DESKTOP (>= 480px)
+     UI mobile-friendly: 2x2 grid otomatis berubah jadi 1 baris 4 kolom
+     =================================================== */
+  @media (min-width: 480px) {
+    .metrics-panel {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* Di satu baris, semua item (termasuk yang tadinya genap) butuh garis kanan
+       kecuali item paling terakhir — override aturan mobile di atas */
+    .metric-item,
+    .metric-item:nth-child(2n) {
+      border-right: 1px solid var(--panel-border);
+      border-bottom: none;
+    }
+
+    .metric-item:last-child {
+      border-right: none;
+    }
+  }
+
+  /* ===================================================
+     7. HORMATI PENGATURAN "REDUCED MOTION" PENGGUNA
+     =================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+  <div class="app">
+
+    <!-- ============ SEARCH BAR ============ -->
+    <form class="search-bar" id="searchForm">
+      <input
+        type="text"
+        id="cityInput"
+        class="search-input"
+        placeholder="Cari nama kota..."
+        autocomplete="off"
+      >
+      <button type="submit" class="search-btn">Cari</button>
+    </form>
+
+    <!-- ============ STATE: LOADING ============ -->
+    <div class="state hidden" id="loadingState">
+      <div class="spinner"></div>
+      <p>Mengambil data cuaca...</p>
+    </div>
+
+    <!-- ============ STATE: ERROR ============ -->
+    <div class="state error-state hidden" id="errorState">
+      <p class="error-icon">⚠️</p>
+      <p class="error-text" id="errorText"></p>
+    </div>
+
+    <!-- ============ HASIL CUACA ============ -->
+    <div class="hidden" id="weatherView">
+      <div class="hero">
+        <img src="" alt="" class="weather-icon" id="weatherIcon">
+        <p class="temperature" id="temperature"></p>
+        <p class="description" id="description"></p>
+        <p class="location" id="location"></p>
+      </div>
+
+      <!-- diisi otomatis lewat JS, lihat fungsi renderMetrics() -->
+      <div class="metrics-panel" id="metricsPanel" style="margin-top: 28px;"></div>
+    </div>
+
+  </div>
+
+<script>
+  /* ===================================================
+     1. KONFIGURASI API
+     =================================================== */
+  // Daftar API key GRATIS di https://openweathermap.org/api,
+  // lalu ganti nilai di bawah ini dengan API key milik Anda.
+  const API_KEY = 'MASUKKAN_API_KEY_ANDA_DI_SINI';
+  const BASE_URL = 'https://api.openweathermap.org/data/2.5/weather';
+
+  // Kota yang otomatis ditampilkan saat halaman pertama kali dibuka.
+  // Bebas diganti ke kota lain sesuai kebutuhan.
+  const DEFAULT_CITY = 'Medan';
+
+  /* ===================================================
+     2. TEMA WARNA LANGIT PER KONDISI CUACA
+     Nilai "Clear", "Rain", dst diambil dari field weather[0].main
+     pada respons OpenWeatherMap. Objek ini dipakai supaya latar
+     belakang halaman ikut berubah sesuai cuaca kota yang dicari.
+     =================================================== */
+  const WEATHER_THEMES = {
+    Clear: 'linear-gradient(180deg, #1e5a8e 0%, #6fb8e0 100%)',
+    Clouds: 'linear-gradient(180deg, #5b6b7c 0%, #98a7b6 100%)',
+    Rain: 'linear-gradient(180deg, #263647 0%, #4e6b85 100%)',
+    Drizzle: 'linear-gradient(180deg, #263647 0%, #4e6b85 100%)',
+    Thunderstorm: 'linear-gradient(180deg, #201f33 0%, #46476b 100%)',
+    Snow: 'linear-gradient(180deg, #7fa6c7 0%, #e9f2f9 100%)',
+    Mist: 'linear-gradient(180deg, #64707d 0%, #abb7c2 100%)',
+    Fog: 'linear-gradient(180deg, #64707d 0%, #abb7c2 100%)',
+    Haze: 'linear-gradient(180deg, #64707d 0%, #abb7c2 100%)'
+  };
+
+  // Arrow function + template literal tidak dipakai di sini karena
+  // nilainya diambil langsung dari object di atas (lookup sederhana)
+  const applyWeatherTheme = (weatherMain) => {
+    document.body.style.background = WEATHER_THEMES[weatherMain] || WEATHER_THEMES.Clear;
+  };
+
+  /* ===================================================
+     3. REFERENSI ELEMEN DOM
+     Dikumpulkan di satu tempat supaya gampang dilacak/diedit
+     =================================================== */
+  const searchForm = document.getElementById('searchForm');
+  const cityInput = document.getElementById('cityInput');
+
+  const loadingState = document.getElementById('loadingState');
+  const errorState = document.getElementById('errorState');
+  const errorText = document.getElementById('errorText');
+  const weatherView = document.getElementById('weatherView');
+
+  const weatherIcon = document.getElementById('weatherIcon');
+  const temperatureEl = document.getElementById('temperature');
+  const descriptionEl = document.getElementById('description');
+  const locationEl = document.getElementById('location');
+  const metricsPanel = document.getElementById('metricsPanel');
+
+  /* ===================================================
+     4. FUNGSI BANTUAN: TAMPILKAN/SEMBUNYIKAN STATE
+     Supaya cuma 1 state yang tampil dalam satu waktu
+     (loading / error / hasil cuaca)
+     =================================================== */
+  const showLoading = () => {
+    loadingState.classList.remove('hidden');
+    errorState.classList.add('hidden');
+    weatherView.classList.add('hidden');
+  };
+
+  const showError = (message) => {
+    errorText.textContent = message;
+    errorState.classList.remove('hidden');
+    loadingState.classList.add('hidden');
+    weatherView.classList.add('hidden');
+  };
+
+  const showWeather = () => {
+    weatherView.classList.remove('hidden');
+    loadingState.classList.add('hidden');
+    errorState.classList.add('hidden');
+  };
+
+  /* ===================================================
+     5. AMBIL DATA CUACA DARI API (async/await + Fetch API)
+     =================================================== */
+  const fetchWeather = async (city) => {
+    showLoading();
+
+    try {
+      const url = `${BASE_URL}?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric&lang=id`;
+      const response = await fetch(url);
+
+      // ----- Error handling: kota tidak ditemukan (404) -----
+      if (response.status === 404) {
+        showError('Kota tidak ditemukan. Periksa ejaan nama kota dan coba lagi.');
+        return;
+      }
+
+      // ----- Error handling: API key salah/belum aktif (401) -----
+      if (response.status === 401) {
+        showError('API key tidak valid. Periksa kembali variabel API_KEY pada kode.');
+        return;
+      }
+
+      // Status selain 200/404/401 (misalnya server API sedang bermasalah)
+      if (!response.ok) {
+        showError('Terjadi kesalahan saat mengambil data cuaca. Coba lagi beberapa saat lagi.');
+        return;
+      }
+
+      const data = await response.json();
+      renderWeather(data);
+
+    } catch (error) {
+      // ----- Error handling: network error (tidak ada koneksi internet, dll) -----
+      // fetch() akan "throw" ke blok catch ini kalau request gagal terkirim sama sekali
+      showError('Tidak dapat terhubung ke server. Periksa koneksi internet Anda.');
+      console.error('Fetch error:', error);
+    }
+  };
+
+  /* ===================================================
+     6. TAMPILKAN DATA CUACA UTAMA KE HALAMAN
+     =================================================== */
+  const renderWeather = (data) => {
+    const cityName = `${data.name}, ${data.sys.country}`;
+    const temp = Math.round(data.main.temp);
+    const description = data.weather[0].description;
+    const iconCode = data.weather[0].icon;
+    const weatherMain = data.weather[0].main;
+
+    weatherIcon.src = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+    weatherIcon.alt = description;
+    temperatureEl.textContent = `${temp}°C`;
+    descriptionEl.textContent = description;
+    locationEl.textContent = cityName;
+
+    renderMetrics(data);
+    applyWeatherTheme(weatherMain);
+    showWeather();
+  };
+
+  /* ===================================================
+     7. BANGUN PANEL METRIK (kelembaban, terasa seperti, angin, tekanan)
+     Requirement tugas "minimal 1 array method" dipenuhi di sini
+     lewat metrics.map(), lalu digabung dengan join()
+     =================================================== */
+  const renderMetrics = (data) => {
+    const metrics = [
+      { icon: '💧', label: 'Kelembaban', value: `${data.main.humidity}%` },
+      { icon: '🌡️', label: 'Terasa seperti', value: `${Math.round(data.main.feels_like)}°C` },
+      { icon: '💨', label: 'Angin', value: `${data.wind.speed} m/s` },
+      { icon: '📊', label: 'Tekanan', value: `${data.main.pressure} hPa` }
+    ];
+
+    // map() mengubah tiap objek metrik menjadi potongan HTML,
+    // join('') menggabungkan semuanya jadi satu string HTML utuh
+    metricsPanel.innerHTML = metrics
+      .map((metric) => `
+        <div class="metric-item">
+          <span class="metric-icon">${metric.icon}</span>
+          <span class="metric-value">${metric.value}</span>
+          <span class="metric-label">${metric.label}</span>
+        </div>
+      `)
+      .join('');
+  };
+
+  /* ===================================================
+     8. EVENT LISTENER: FORM PENCARIAN
+     =================================================== */
+  searchForm.addEventListener('submit', (event) => {
+    event.preventDefault(); // Mencegah halaman reload saat form disubmit
+
+    const city = cityInput.value.trim();
+
+    if (city === '') {
+      showError('Masukkan nama kota terlebih dahulu.');
+      return;
+    }
+
+    fetchWeather(city);
+  });
+
+  /* ===================================================
+     9. PENGECEKAN API KEY & MUAT DATA AWAL
+     =================================================== */
+  if (API_KEY === '7d75ae24f6bcb07b9b323fd4db229019') {
+    showError('API key belum diisi. Daftar gratis di openweathermap.org/api, lalu isi variabel API_KEY di bagian atas kode JS.');
+  } else {
+    fetchWeather(DEFAULT_CITY);
+  }
+</script>
+
+</body>
+</html>
